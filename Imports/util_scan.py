@@ -49,14 +49,13 @@ def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
     
     # Open the image, convert to luminance greyscale and then a numpy array
     imgPIL = Image.open(imgName).convert("L")
-    #imgArr = 256 - np.flipud(np.asarray(imgPIL))
-    #imgArr = 256 - np.asarray(imgPIL)
-    imgArr = np.asarray(imgPIL)
+    # Invert image array so black dots on white background become bright signal on dark background
+    imgArr = 255.0 - np.asarray(imgPIL, dtype=float)
 
     # Subtract the flat image
     if flatImgName:
         flatPIL = Image.open(flatImgName).convert("L")
-        flatArr = 256 - np.flipud(np.asarray(flatPIL))
+        flatArr = 255.0 - np.asarray(flatPIL, dtype=float)
         imgArr =  imgArr - flatArr
         
     # Crop the image
@@ -154,7 +153,7 @@ def write_arrayfile(fileName, X_m, Y_m, Nx, Ny, scale_m, telescope,
     # Convert from pixels to metres
     pixScale_m = scale_m/float(Nx)
     E_m = (X_m - Nx/2.0) * pixScale_m
-    N_m = (Y_m - Ny/2.0) * pixScale_m
+    N_m = (Ny/2.0 - Y_m) * pixScale_m
 
     # Write an array definition file
     FH = open(fileName, "w")

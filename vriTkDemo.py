@@ -615,14 +615,26 @@ class App(ttk.Frame):
         self.obsManager._load_one_array(tmpFile)
         
         # Append to the list of available array configurations
-        vals = self.obsManager.arrsAvailable.values()[-1]
+        vals = list(self.obsManager.arrsAvailable.values())[-1]
         configLst = zip([vals["telescope"]],
                         [vals["config"]])
         self.selector.configInTab.insert_rows(configLst,
                                               ("Telescope", "Array"))
         
-        # Clean up
-        os.remove(tmpFile)
+        # Auto-select the scanned array configuration for observation
+        tel_name = vals["telescope"]
+        cfg_name = vals["config"]
+        ha_start = self.selector.haScale.valueLeft.get()
+        ha_end = self.selector.haScale.valueRight.get()
+        samp_rt = self.selector.sampRt_s.get()
+        
+        self.selector.configOutTab.insert_rows(
+            [[tel_name, cfg_name, ha_start, ha_end, samp_rt]],
+            ("Telescope", "  Array  ", "HA-Start", " HA-End ", "Cadence")
+        )
+        
+        # Trigger selection changed event to calculate baselines & update plots automatically!
+        self._on_sel_change()
         
         
 #-----------------------------------------------------------------------------#
@@ -1033,16 +1045,27 @@ class ArrayScanner(ttk.Frame):
         plt.setp(self.ax.get_yticklabels(), visible=False)
         plt.setp(self.ax.get_xticklabels(), visible=False)
 
+    def _capture_webcam_frame(self, resX, resY):
+        """Attempt to capture a frame from available webcam indices (0, 1, 2)."""
+        cam = cv2.VideoCapture()
+        success = False
+        img = None
+        for idx in [0, 1, 2]:
+            if cam.open(idx):
+                cam.set(cv2.CAP_PROP_FRAME_WIDTH, resX)
+                cam.set(cv2.CAP_PROP_FRAME_HEIGHT, resY)
+                for _ in range(10):
+                    success, img = cam.read()
+                if success and img is not None and img.size > 0:
+                    cam.release()
+                    return True, img
+                cam.release()
+        return False, None
+
     def _handler_scan_button(self):
 
-        # Capture an image of the array via webcam 2
-        cam = cv2.VideoCapture()
-        cam.open(1)
-        cam.set(3, int(self.resX.get()))
-        cam.set(4, int(self.resX.get()))
-        for i in range(10):
-            success, img = cam.read()
-        cam.release()
+        # Capture an image of the array via webcam
+        success, img = self._capture_webcam_frame(int(self.resX.get()), int(self.resY.get()))
         if success:
 
             # Resize the image to make it easier to manage
@@ -1072,20 +1095,14 @@ class ArrayScanner(ttk.Frame):
 
             # Enable/disable saving
             if len(self.X_m)>0:
-                self.saveBtn.configure(state="enabled")
+                self.saveBtn.configure(state="normal")
             else:
                 self.saveBtn.configure(state="disabled")
     
     def _handler_flat_button(self):
 
-        # Capture an image of the array via webcam 2
-        cam = cv2.VideoCapture()
-        cam.open(0)
-        cam.set(3, int(self.resX.get()))
-        cam.set(4, int(self.resX.get()))
-        for i in range(10):
-            success, img = cam.read()
-        cam.release()
+        # Capture an image of the array via webcam
+        success, img = self._capture_webcam_frame(int(self.resX.get()), int(self.resY.get()))
         if success:
             # Resize the image to make it easier to manage
             img = cv2.resize(img, (0,0), fx=0.5, fy=0.5)
@@ -1112,7 +1129,7 @@ class ArrayScanner(ttk.Frame):
         # Increment the number of the telescope
         pre, i = self.myScope.get().rsplit("_")
         self.myScope.set(pre + "_" + str(int(i)+1))
-        self.event_generate("<<array_scanned>>")
+        self.winfo_toplevel().event_generate("<<array_scanned>>")
 
     def _show_control_window(self):
         """Set focus back to the main control window."""
