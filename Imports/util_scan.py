@@ -138,7 +138,12 @@ def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
     # Plot the detected antenna positions
     if ax is not None:
         ax.cla()
-        ax.imshow(rawCrop, interpolation="nearest", cmap=cmap, origin='lower')
+        # For foil mode, display bright reflections as black spots on a white background (gray_r)
+        if scan_mode == "foil" and cmap == "gray":
+            plot_cmap = "gray_r"
+        else:
+            plot_cmap = cmap
+        ax.imshow(rawCrop, interpolation="nearest", cmap=plot_cmap, origin='lower')
 
         # Annotate the detected antennae
         for x, y in zip(X_pix, Y_pix):
