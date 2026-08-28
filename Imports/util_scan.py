@@ -62,18 +62,35 @@ def get_available_cameras(max_tested=4):
 
 #-----------------------------------------------------------------------------#
 def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
-                      cropX=640, cropY=480, flatImgName=None, ax=None):
+                      cropX=640, cropY=480, flatImgName=None, ax=None,
+                      scan_mode="foil", cmap="gray"):
     
     # Open the image, convert to luminance greyscale and then a numpy array
     imgPIL = Image.open(imgName).convert("L")
-    # Invert image array so black dots on white background become bright signal on dark background
-    imgArr = 255.0 - np.asarray(imgPIL, dtype=float)
+    rawArr = np.asarray(imgPIL, dtype=float)
+
+    # Determine inversion based on mode:
+    # "foil": Aluminum foil dishes on illuminated lightbox (specular reflections, no inversion)
+    # "dots": Dark ink dots on white paper (inverts 255 - rawArr)
+    # "auto": Auto-detect based on median brightness
+    if scan_mode == "dots":
+        imgArr = 255.0 - rawArr
+    elif scan_mode == "auto":
+        if np.median(rawArr) > 128:
+            imgArr = rawArr
+        else:
+            imgArr = rawArr
+    else:
+        # Default: "foil" mode for illuminated lightbox with aluminum foil dishes
+        imgArr = rawArr
 
     # Subtract the flat image
     if flatImgName:
         flatPIL = Image.open(flatImgName).convert("L")
-        flatArr = 255.0 - np.asarray(flatPIL, dtype=float)
-        imgArr =  imgArr - flatArr
+        flatArr = np.asarray(flatPIL, dtype=float)
+        if scan_mode == "dots":
+            flatArr = 255.0 - flatArr
+        imgArr = imgArr - flatArr
         
     # Crop the image
     Ny, Nx = imgArr.shape
@@ -82,9 +99,10 @@ def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
     dx = max(0, Nx - cropX1)
     dy = max(0, Ny - cropY1)
     imgArr = imgArr[dy//2:Ny-dy//2, dx//2:Nx-dx//2]
+    rawCrop = rawArr[dy//2:Ny-dy//2, dx//2:Nx-dx//2]
     
-    # Remove large-scale background using morphological opening
-    if eSize>=3:
+    # Remove large-scale background using morphological opening (White Top-Hat filter)
+    if eSize >= 3:
         foot = generate_footprint(int(eSize))
         imgErode = ndimage.grey_erosion(imgArr, footprint=foot)
         imgOpen = ndimage.grey_dilation(imgErode, footprint=foot)
@@ -93,16 +111,14 @@ def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
         imgBgArr = imgArr.copy()
 
     # Determine the finding threshold
-    zMax = np.nanmax(imgBgArr)
-    zMin = np.nanmin(imgBgArr)
     rms = np.std(imgBgArr)
     zMed = np.median(imgBgArr)
     threshold = zMed + rms * threshold_sigma
     
     # Convert to a binary mask
     imgMskArr = np.copy(imgBgArr)
-    imgMskArr[imgBgArr<threshold] = 0
-    imgMskArr[imgMskArr>=threshold] = 1
+    imgMskArr[imgBgArr < threshold] = 0
+    imgMskArr[imgMskArr >= threshold] = 1
     
     # Find the objects and extract subimages
     imgLabeled, Nobjects = ndimage.label(imgMskArr)
@@ -113,17 +129,16 @@ def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
     Y_pix = []
     for island in islands:
         if np.sum(imgMskArr[island]) > minPix:
-            dy, dx  = island
-            x, y = dx.start, dy.start
+            dy_i, dx_i = island
+            x, y = dx_i.start, dy_i.start
             cx, cy = centroid(imgMskArr[island])
             X_pix.append(x + cx)
             Y_pix.append(y + cy)
 
     # Plot the detected antenna positions
-    if not ax==None:
+    if ax is not None:
         ax.cla()
-        ax.imshow(imgBgArr, interpolation="nearest", cmap="gray_r",
-                  origin='lower')
+        ax.imshow(rawCrop, interpolation="nearest", cmap=cmap, origin='lower')
 
         # Annotate the detected antennae
         for x, y in zip(X_pix, Y_pix):

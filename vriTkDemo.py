@@ -935,59 +935,79 @@ class ArrayScanner(ttk.Frame):
         else:
             self.camComb.current(0)
         self.camComb.grid(column=1, row=0, columnspan=2, padx=5, pady=5, sticky="EW")
+        # Target Mode selection
+        self.targetLab = ttk.Label(self.scanFrm, text="Target Mode:")
+        self.targetLab.grid(column=0, row=1, padx=5, pady=5, sticky="E")
+        self.targetMode = tk.StringVar()
+        self.targetComb = ttk.Combobox(self.scanFrm, state="readonly",
+                                       textvariable=self.targetMode,
+                                       values=["Reflective Foil (Light Table)", "Dark Dots (Paper Sheet)", "Auto Detect"],
+                                       width=15)
+        self.targetComb.current(0)
+        self.targetComb.grid(column=1, row=1, columnspan=2, padx=5, pady=5, sticky="EW")
         # Resolution
         self.resLab = ttk.Label(self.scanFrm, text="Resolution:")
-        self.resLab.grid(column=0, row=1, padx=5, pady=5, sticky="E")
+        self.resLab.grid(column=0, row=2, padx=5, pady=5, sticky="E")
         self.resX = tk.StringVar()
         self.resY = tk.StringVar()
         self.resX.set("1280")
         self.resY.set("800")
         self.resXEnt = ttk.Entry(self.scanFrm, width=5,
                                   textvariable=self.resX)
-        self.resXEnt.grid(column=1, row=1, padx=5, pady=5, sticky="EW")
+        self.resXEnt.grid(column=1, row=2, padx=5, pady=5, sticky="EW")
         self.resYEnt = ttk.Entry(self.scanFrm, width=5,
                                   textvariable=self.resY)
-        self.resYEnt.grid(column=2, row=1, padx=5, pady=5, sticky="EW")
+        self.resYEnt.grid(column=2, row=2, padx=5, pady=5, sticky="EW")
         # Crop size
         self.cropLab = ttk.Label(self.scanFrm, text="Crop Size:")
-        self.cropLab.grid(column=0, row=2, padx=5, pady=5, sticky="E")
+        self.cropLab.grid(column=0, row=3, padx=5, pady=5, sticky="E")
         self.cropX = tk.StringVar()
         self.cropY = tk.StringVar()
         self.cropX.set("30")
         self.cropY.set("30")
         self.cropXEnt = ttk.Entry(self.scanFrm, width=5,
                                   textvariable=self.cropX)
-        self.cropXEnt.grid(column=1, row=2, padx=5, pady=5, sticky="EW")
+        self.cropXEnt.grid(column=1, row=3, padx=5, pady=5, sticky="EW")
         self.cropYEnt = ttk.Entry(self.scanFrm, width=5,
                                   textvariable=self.cropY)
-        self.cropYEnt.grid(column=2, row=2, padx=5, pady=5, sticky="EW")
+        self.cropYEnt.grid(column=2, row=3, padx=5, pady=5, sticky="EW")
         # Smoothing kernel
         self.kernLab = ttk.Label(self.scanFrm, text="Kernel Size:")
-        self.kernLab.grid(column=0, row=3, padx=5, pady=5, sticky="E")
+        self.kernLab.grid(column=0, row=4, padx=5, pady=5, sticky="E")
         self.kernSize = tk.StringVar()
         self.kernSize.set("0")
         self.kernEnt = ttk.Entry(self.scanFrm, width=5,
                                  textvariable=self.kernSize)
-        self.kernEnt.grid(column=1, row=3, columnspan=2, padx=5, pady=5,
+        self.kernEnt.grid(column=1, row=4, columnspan=2, padx=5, pady=5,
                           sticky="EW")
         # Detection threshold
         self.sigmaLab = ttk.Label(self.scanFrm, text="Threshold (sigma):")
-        self.sigmaLab.grid(column=0, row=4, padx=5, pady=5, sticky="E")
+        self.sigmaLab.grid(column=0, row=5, padx=5, pady=5, sticky="E")
         self.sigma = tk.StringVar()
         self.sigma.set("3")
         self.sigmaEnt = ttk.Entry(self.scanFrm, width=5,
                                   textvariable=self.sigma)
-        self.sigmaEnt.grid(column=1, row=4, columnspan=2, padx=5, pady=5,
+        self.sigmaEnt.grid(column=1, row=5, columnspan=2, padx=5, pady=5,
                           sticky="EW")
         # Min number pixels in island
         self.minPixLab = ttk.Label(self.scanFrm, text="Min # Pixels:")
-        self.minPixLab.grid(column=0, row=5, padx=5, pady=5, sticky="E")
+        self.minPixLab.grid(column=0, row=6, padx=5, pady=5, sticky="E")
         self.minPix = tk.StringVar()
-        self.minPix.set("200")
+        self.minPix.set("100")
         self.minPixEnt = ttk.Entry(self.scanFrm, width=5,
                                    textvariable=self.minPix)
-        self.minPixEnt.grid(column=1, row=5, columnspan=2, padx=5, pady=5,
+        self.minPixEnt.grid(column=1, row=6, columnspan=2, padx=5, pady=5,
                           sticky="EW")
+        # Colormap selection
+        self.cmapLab = ttk.Label(self.scanFrm, text="Colormap:")
+        self.cmapLab.grid(column=0, row=7, padx=5, pady=5, sticky="E")
+        self.cmapMode = tk.StringVar()
+        self.cmapComb = ttk.Combobox(self.scanFrm, state="readonly",
+                                     textvariable=self.cmapMode,
+                                     values=["gray", "gray_r", "viridis", "plasma"],
+                                     width=10)
+        self.cmapComb.current(0)
+        self.cmapComb.grid(column=1, row=7, columnspan=2, padx=5, pady=5, sticky="EW")
         # Flat Field button
         self.flatBtn = ttk.Button(self.scanFrm, text="Flat Field", width=20,
                                   command=self._handler_flat_button)
@@ -1117,6 +1137,9 @@ class ArrayScanner(ttk.Frame):
                 flatImgName = "arrays/scan.png"
             else:
                 flatImgName = None
+
+            scan_mode = "foil" if "Foil" in self.targetMode.get() else ("dots" if "Dark" in self.targetMode.get() else "auto")
+            cmap_name = self.cmapMode.get()
             self.X_m, self.Y_m, self.shape = \
                 scan_to_pixcoords("arrays/scan.png",
                                   eSize=float(self.kernSize.get()),
@@ -1125,7 +1148,9 @@ class ArrayScanner(ttk.Frame):
                                   cropX=img.shape[1]-int(self.cropX.get()),
                                   cropY=img.shape[0]-int(self.cropY.get()),
                                   flatImgName = flatImgName, 
-                                  ax=self.ax)
+                                  ax=self.ax,
+                                  scan_mode=scan_mode,
+                                  cmap=cmap_name)
 
             # Show the scanned figure and allow saving
             self.figCanvas.draw()
@@ -1850,8 +1875,8 @@ class PlotFrame(ttk.Frame):
             zMin = None
             zMax = None
         
-        # Show the image array
-        ax.imshow(imgArr, cmap=plt.cm.cubehelix, interpolation="nearest",
+        # Show the image array in natural grayscale by default
+        ax.imshow(imgArr, cmap=plt.cm.gray, interpolation="nearest",
                   origin="lower", vmin=zMin, vmax=zMax)
         ax.set_aspect('equal')
         self.axDict[axName][2] = 1
