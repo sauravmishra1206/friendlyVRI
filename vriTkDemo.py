@@ -661,13 +661,20 @@ class ModelSelector(ttk.Frame):
         self.imgPreview.bind("<<model_selected>>",
                          lambda event : self._handler_image_selected(event))
 
-        # Webcam button
+        # Webcam button & selection dropdown
         self.cameraPhoto = tk.PhotoImage(file='Imports/camera.gif')
         self.cameraBtn = ttk.Button(self, image=self.cameraPhoto, width=16,
                                     compound="left", text=" Capture Photo",
                                     command=self._handler_capture_photo)
-        self.cameraBtn.grid(column=0, row=1, rowspan=2, padx=5, pady=5,
+        self.cameraBtn.grid(column=0, row=1, rowspan=1, padx=5, pady=5,
                             sticky="NSW")
+        cam_list = get_available_cameras()
+        self.camDev = tk.StringVar()
+        self.camComb = ttk.Combobox(self, state="readonly",
+                                    textvariable=self.camDev,
+                                    values=cam_list, width=12)
+        self.camComb.current(0)
+        self.camComb.grid(column=0, row=2, padx=5, pady=5, sticky="NSW")
         
         # Image details
         self.fileLab = ttk.Label(self, text="Chosen Image:")
@@ -714,24 +721,32 @@ class ModelSelector(ttk.Frame):
                     self.event_generate("<<load_model_image>>")
         
     def _handler_capture_photo(self):
-        """Capture a photo using the webcam."""
+        """Capture a photo using the selected webcam."""
         
+        sel_idx = 0
+        try:
+            val = self.camDev.get()
+            if "Camera" in val:
+                sel_idx = int(val.split()[-1])
+        except Exception:
+            sel_idx = 0
+
         try:
             cam = cv2.VideoCapture()
-            cam.open(0)
-            #cam.set(3, int(self.resX.get()))
-            #cam.set(4, int(self.resX.get()))
-            for i in range(10):
-                success, img = cam.read()
-            cam.release()
+            search_indices = [sel_idx] + [i for i in [0, 1, 2, 3] if i != sel_idx]
+            success = False
+            for idx in search_indices:
+                if cam.open(idx):
+                    for i in range(10):
+                        success, img = cam.read()
+                    cam.release()
+                    if success and img is not None and img.size > 0:
+                        break
             if success:
                 cv2.imwrite("models/webcam.png", img)
                 self.modelFile.set("webcam.png")
                 self.modelPath = "models/webcam.png"
-                self.imgPreview.display_image(self.modelPath)
-
-                
-                #self.event_generate("<<load_model_image>>")
+                self.event_generate("<<load_model_image>>")
         except Exception:
             pass
     
@@ -907,6 +922,19 @@ class ArrayScanner(ttk.Frame):
         # Scanner settings
         self.scanFrm = ttk.Labelframe(self, text=" Scanner Settings ")
         self.scanFrm.grid(column=0, row=0, padx=5, pady=5, sticky="NSEW")
+        # Camera device selection
+        self.camLab = ttk.Label(self.scanFrm, text="Camera:")
+        self.camLab.grid(column=0, row=0, padx=5, pady=5, sticky="E")
+        self.camDev = tk.StringVar()
+        cam_list = get_available_cameras()
+        self.camComb = ttk.Combobox(self.scanFrm, state="readonly",
+                                    textvariable=self.camDev,
+                                    values=cam_list, width=10)
+        if len(cam_list) > 1:
+            self.camComb.current(1)
+        else:
+            self.camComb.current(0)
+        self.camComb.grid(column=1, row=0, columnspan=2, padx=5, pady=5, sticky="EW")
         # Resolution
         self.resLab = ttk.Label(self.scanFrm, text="Resolution:")
         self.resLab.grid(column=0, row=1, padx=5, pady=5, sticky="E")
@@ -1046,11 +1074,20 @@ class ArrayScanner(ttk.Frame):
         plt.setp(self.ax.get_xticklabels(), visible=False)
 
     def _capture_webcam_frame(self, resX, resY):
-        """Attempt to capture a frame from available webcam indices (0, 1, 2)."""
+        """Attempt to capture a frame from selected camera device or fallback."""
+        sel_idx = 0
+        try:
+            val = self.camDev.get()
+            if "Camera" in val:
+                sel_idx = int(val.split()[-1])
+        except Exception:
+            sel_idx = 0
+
         cam = cv2.VideoCapture()
+        search_indices = [sel_idx] + [i for i in [0, 1, 2, 3] if i != sel_idx]
         success = False
         img = None
-        for idx in [0, 1, 2]:
+        for idx in search_indices:
             if cam.open(idx):
                 cam.set(cv2.CAP_PROP_FRAME_WIDTH, resX)
                 cam.set(cv2.CAP_PROP_FRAME_HEIGHT, resY)

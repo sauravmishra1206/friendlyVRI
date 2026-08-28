@@ -43,7 +43,24 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from PIL import Image
 
-#-----------------------------------------------------------------------------@
+#-----------------------------------------------------------------------------#
+def get_available_cameras(max_tested=4):
+    """Probe system video capture devices and return list of available camera labels."""
+    try:
+        import cv2
+        cams = []
+        for i in range(max_tested):
+            cap = cv2.VideoCapture()
+            if cap.open(i):
+                cams.append("Camera %d" % i)
+                cap.release()
+        if not cams:
+            cams = ["Camera 0"]
+        return cams
+    except Exception:
+        return ["Camera 0"]
+
+#-----------------------------------------------------------------------------#
 def scan_to_pixcoords(imgName, eSize=41, threshold_sigma=3.0, minPix=100,
                       cropX=640, cropY=480, flatImgName=None, ax=None):
     
