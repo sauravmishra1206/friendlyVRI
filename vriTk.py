@@ -589,9 +589,12 @@ class App(ttk.Frame):
     def _on_scan_array(self, event=None):
         """Load the latest scan of the antenna plate."""
         
+        savedFile = getattr(self.scanner, "lastSavedFile", "arrays/custom.config")
+        if not os.path.exists(savedFile):
+            savedFile = "arrays/custom.config"
+
         # Load the custom array file into the observation manager
-        tmpFile = "arrays/custom.config"
-        self.obsManager._load_one_array(tmpFile)
+        self.obsManager._load_one_array(savedFile)
         
         # Append to the list of available array configurations
         vals = list(self.obsManager.arrsAvailable.values())[-1]
@@ -600,6 +603,22 @@ class App(ttk.Frame):
         self.selector.configInTab.insert_rows(configLst,
                                               ("Telescope", "Array"))
         
+        # Update the left-hand scatter plot (antPosPlot) to show the newly scanned array!
+        new_row_idx = len(self.obsManager.arrsAvailable) - 1
+        try:
+            d = self.obsManager.get_array_params(row=new_row_idx)
+            if d["x"] is not None and d["y"] is not None:
+                self.selector.antPosPlot.load_data(d["x"]/1000.0, d["y"]/1000.0)
+                self.selector.antPosPlot.draw_zerolines()
+                self.selector.antPosPlot.set_xlabel("East-West (km)")
+                self.selector.antPosPlot.set_ylabel("North-South (km)")
+                self.selector.antD_m.set("{:.1f} m".format(d["diameter_m"]))
+                self.selector.antL_deg.set(u"{:.4f}\u00B0".format(d["latitude_deg"]))
+                self.selector.minBase_km.set(u"{:.3f} km".format(d["baseMin_m"]/1000.0))
+                self.selector.maxBase_km.set(u"{:.3f} km".format(d["baseMax_m"]/1000.0))
+        except Exception:
+            pass
+
         # Auto-select the scanned array configuration for observation
         tel_name = vals["telescope"]
         cfg_name = vals["config"]
@@ -1038,21 +1057,24 @@ class ArrayScanner(ttk.Frame):
             
     def _handler_save_button(self):
         
-        # Write a temporary array definition file
-        tmpFile = "arrays/custom.config"
-        write_arrayfile(tmpFile,
+        t_name = self.myScope.get()
+        c_name = self.myArray.get()
+        saveFile = "arrays/%s_%s.config" % (t_name, c_name)
+        write_arrayfile(saveFile,
                         X_m=self.X_m,
                         Y_m=self.Y_m,
                         Nx=self.shape[-1],
                         Ny=self.shape[-2],
                         scale_m=float(self.plateScale.get()),
-                        telescope=self.myScope.get(),
-                        config=self.myArray.get(),
+                        telescope=t_name,
+                        config=c_name,
                         latitude_deg=float(self.myLat.get()),
                         diameter_m=float(self.myAntDiam.get()))
 
+        self.lastSavedFile = saveFile
+
         # Increment the number of the telescope
-        pre, i = self.myScope.get().rsplit("_")
+        pre, i = t_name.rsplit("_")
         self.myScope.set(pre + "_" + str(int(i)+1))
         self.winfo_toplevel().event_generate("<<array_scanned>>")
 

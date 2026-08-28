@@ -169,7 +169,7 @@ class ScrolledTreeTab(ttk.Frame):
             self.tree.column(col, minwidth=strWidth + self.strPad)
             
         # Populate the rows
-        rowIndx = 0
+        rowIndx = len(self.tree.get_children())
         for row in rows:
             row = [str(x) for x in row]   # Convert to plain strings
             self.tree.insert('', 'end', values=row, text=str(rowIndx))
