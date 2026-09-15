@@ -147,12 +147,15 @@ class observationManager:
         
         # Model image and parameters
         self.modelImgArr = None
+        self.modelImgRGB = None
+        self.hasColor = False
         self.nX = None
         self.nY = None
         self.pixScaleImg_asec = None
 
         # Model FFT image and parameters
         self.modelFFTarr = None
+        self.modelFFTarr_RGB = None
         self.fftScale_lam = None
         self.pixScaleFFTX_lam = None
         self.pixScaleFFTY_lam = None
@@ -164,7 +167,9 @@ class observationManager:
         
         # Observed FFT and final image
         self.obsFFTarr = None
+        self.obsFFTarr_RGB = None
         self.obsImgArr = None
+        self.obsImgRGB = None
 
         # Flags
         self.statusSelection = False
@@ -189,20 +194,25 @@ class observationManager:
         self.scaleMax_deg = None
         self.priBeamMax_deg = None
         self.obsFFTarr = None
+        self.obsFFTarr_RGB = None
         self.obsImgArr = None
+        self.obsImgRGB = None
 
     def _reset_model_vars(self):
         """Reset the variables associated with the model."""
         
         self.pixScaleImg_asec = None
         self.modelFFTarr = None
+        self.modelFFTarr_RGB = None
         self.fftScale_lam = None
         self.pixScaleFFTX_lam = None
         self.pixScaleFFTY_lam = None
         self.uvMaskArr = None
         self.beamArr = None
         self.obsFFTarr = None
+        self.obsFFTarr_RGB = None
         self.obsImgArr = None
+        self.obsImgRGB = None
         
     def _load_one_array(self, arrayFile):
         """Load a single ASCII array file into memory."""
@@ -516,10 +526,20 @@ class observationManager:
         self.statusBeam = False
         self.statusObsDone = False
         
-        # Open the image, convert to luminance and then a numpy array
+        # Open the image, check for RGB channels, convert to luminance and numpy arrays
         try:
-            imgPIL = Image.open(modelFile).convert("L")
-            self.modelImgArr = np.flipud(np.asarray(imgPIL))
+            imgPIL_RGB = Image.open(modelFile).convert("RGB")
+            self.modelImgRGB = np.flipud(np.asarray(imgPIL_RGB))
+            
+            # Check if this image has genuine color variations across channels
+            if np.any(self.modelImgRGB[:, :, 0] != self.modelImgRGB[:, :, 1]) or \
+               np.any(self.modelImgRGB[:, :, 0] != self.modelImgRGB[:, :, 2]):
+                self.hasColor = True
+            else:
+                self.hasColor = False
+
+            imgPIL_L = imgPIL_RGB.convert("L")
+            self.modelImgArr = np.flipud(np.asarray(imgPIL_L))
             self.pixScaleImg_asec = pixScaleImg_asec
             self.nY, self.nX = self.modelImgArr.shape
         except Exception:
@@ -536,6 +556,8 @@ class observationManager:
             print("Image size = %d x %d pixels [%s x %s]" % (self.nX, self.nY,
                                 ang2str(self.nX*self.pixScaleImg_asec/3600.0),
                                 ang2str(self.nY*self.pixScaleImg_asec/3600.0)))
+            if self.hasColor:
+                print("Color mode: RGB (3-channel true color detected)")
         
         # Set the status of the model image & FFT flags to True
         self.statusModel = True
@@ -583,6 +605,15 @@ class observationManager:
         try:
             self.modelFFTarr = np.fft.fft2(self.modelImgArr)
             self.modelFFTarr = np.fft.fftshift(self.modelFFTarr)
+
+            if self.hasColor and self.modelImgRGB is not None:
+                self.modelFFTarr_RGB = np.stack([
+                    np.fft.fftshift(np.fft.fft2(self.modelImgRGB[:, :, c].astype(np.float64)))
+                    for c in range(3)
+                ], axis=2)
+            else:
+                self.modelFFTarr_RGB = None
+
             pixScaleImg_lam = np.radians(self.pixScaleImg_asec/3600.0)
             self.fftScale_lam = 1.0/pixScaleImg_lam
             self.pixScaleFFTX_lam = 2.0*self.fftScale_lam/self.nX
@@ -649,6 +680,10 @@ class observationManager:
         # Apply the gridded uv-coverage to the model FFT
         try:
             self.obsFFTarr = self.modelFFTarr.copy()*self.uvMaskArr
+            if self.hasColor and self.modelFFTarr_RGB is not None:
+                self.obsFFTarr_RGB = self.modelFFTarr_RGB.copy() * self.uvMaskArr[:, :, None]
+            else:
+                self.obsFFTarr_RGB = None
         except Exception:
                 if self.verbose:
                     print("Masking failed!")
@@ -707,9 +742,22 @@ class observationManager:
         self.statusObsDone = False
         
         try:
-            
             # Invert to produce the final image
             self.obsImgArr = np.fft.ifft2(np.fft.ifftshift(self.obsFFTarr))
+
+            if self.hasColor and self.obsFFTarr_RGB is not None:
+                recon_channels = [
+                    np.abs(np.fft.ifft2(np.fft.ifftshift(self.obsFFTarr_RGB[:, :, c])))
+                    for c in range(3)
+                ]
+                obsRGB = np.stack(recon_channels, axis=2)
+                c_max = obsRGB.max()
+                if c_max > 0:
+                    self.obsImgRGB = np.clip(obsRGB / c_max, 0.0, 1.0)
+                else:
+                    self.obsImgRGB = obsRGB
+            else:
+                self.obsImgRGB = None
         except Exception:
             if self.verbose:
                 print("Failed produce the observed image!")

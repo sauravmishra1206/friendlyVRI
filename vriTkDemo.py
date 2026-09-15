@@ -237,6 +237,8 @@ class App(ttk.Frame):
                   lambda event : self._on_show_results(event))
         self.parent.bind("<<load_model_image>>",
                        lambda event : self._on_load_model(event))
+        self.parent.bind("<<colormode_changed>>",
+                         lambda event : self._on_colormode_changed(event))
         
         # Force a minimum size on the windows & set resize properties
         self.parent.update()
@@ -532,12 +534,43 @@ class App(ttk.Frame):
         self.modelSelector.extent.set(text)
         
         # Plot the model image
-        self.pltFrm.plot_image("modelImg", self.obsManager.modelImgArr,
-                               title="Model Image")
+        color_mode = getattr(self.modelSelector, "colorMode", None)
+        c_mode = color_mode.get() if color_mode else "Natural Color"
+        if self.obsManager.hasColor and self.obsManager.modelImgRGB is not None and c_mode == "Natural Color":
+            model_disp = self.obsManager.modelImgRGB
+        else:
+            model_disp = self.obsManager.modelImgArr
+        self.pltFrm.plot_image("modelImg", model_disp,
+                               title="Model Image", cmap=c_mode)
         
         # Update the status
         self._update_status()
         
+    def _on_colormode_changed(self, event=None):
+        """Update model and observed image displays when color mode dropdown changes."""
+        color_mode = getattr(self.modelSelector, "colorMode", None)
+        c_mode = color_mode.get() if color_mode else "Natural Color"
+
+        # Update Model Image if loaded
+        if self.obsManager.statusModel:
+            if self.obsManager.hasColor and self.obsManager.modelImgRGB is not None and c_mode == "Natural Color":
+                model_disp = self.obsManager.modelImgRGB
+            else:
+                model_disp = self.obsManager.modelImgArr
+            self.pltFrm.plot_image("modelImg", model_disp,
+                                   title="Model Image", cmap=c_mode)
+
+        # Update Observed Image if observation is done
+        if self.obsManager.statusObsDone:
+            if self.obsManager.hasColor and self.obsManager.obsImgRGB is not None and c_mode == "Natural Color":
+                obs_disp = self.obsManager.obsImgRGB
+            else:
+                obs_disp = np.abs(self.obsManager.obsImgArr)
+            self.pltFrm.plot_image("obsImg", obs_disp,
+                                   title="Observed Image", cmap=c_mode)
+
+        self.pltFrm.figCanvas.draw()
+
     def _on_do_observation(self, event=None):
         """Perform the bulk of the observing steps"""
         
@@ -595,8 +628,14 @@ class App(ttk.Frame):
         self.obsManager.invert_observation()
         
         # Show the observed image
-        self.pltFrm.plot_image("obsImg", np.abs(self.obsManager.obsImgArr),
-                               title="Observed Image")
+        color_mode = getattr(self.modelSelector, "colorMode", None)
+        c_mode = color_mode.get() if color_mode else "Natural Color"
+        if self.obsManager.hasColor and self.obsManager.obsImgRGB is not None and c_mode == "Natural Color":
+            obs_disp = self.obsManager.obsImgRGB
+        else:
+            obs_disp = np.abs(self.obsManager.obsImgArr)
+        self.pltFrm.plot_image("obsImg", obs_disp,
+                               title="Observed Image", cmap=c_mode)
 
         # Update the status
         self._update_status()
@@ -710,6 +749,19 @@ class ModelSelector(ttk.Frame):
         self.extentLab = ttk.Label(self, textvariable=self.extent)
         self.extentLab.grid(column=2, row=2, columnspan=1, padx=5, pady=5,
                             sticky="E")
+        
+        # Color Mode selection (Natural Color vs Grayscale vs Cubehelix)
+        self.colorModeLab = ttk.Label(self, text="Color Mode:")
+        self.colorModeLab.grid(column=1, row=3, padx=(15,5), pady=5, sticky="E")
+        self.colorMode = tk.StringVar()
+        self.colorModeComb = ttk.Combobox(self, state="readonly",
+                                          textvariable=self.colorMode,
+                                          values=["Natural Color", "Grayscale", "Cubehelix"],
+                                          width=14)
+        self.colorModeComb.current(0)
+        self.colorModeComb.grid(column=2, row=3, padx=5, pady=5, sticky="W")
+        self.colorModeComb.bind("<<ComboboxSelected>>",
+                                lambda e: self.event_generate("<<colormode_changed>>"))
         
         # Pixel scale slider
         self.pixScaLab = ttk.Label(self,
@@ -1864,8 +1916,8 @@ class PlotFrame(ttk.Frame):
         root.focus_force()
         root.lift()
 
-    def plot_image(self, axName, imgArr=None, title="", pRng=None):
-        """Plot an image with a scalebar (TBD)."""
+    def plot_image(self, axName, imgArr=None, title="", pRng=None, cmap=None):
+        """Plot an image with support for RGB natural color and colormaps."""
         
         ax = self.axDict[axName][0]
         loc =  self.axDict[axName][1]
@@ -1884,6 +1936,23 @@ class PlotFrame(ttk.Frame):
         if imgArr.max()==imgArr.min():
             return ax
 
+        # Check for 3-channel RGB image
+        if imgArr.ndim == 3 and imgArr.shape[2] >= 3:
+            if cmap in [None, "natural", "Natural Color"]:
+                ax.imshow(imgArr, interpolation="nearest", origin="lower")
+                ax.set_aspect('equal')
+                self.axDict[axName][2] = 1
+                return ax
+            else:
+                # Convert to luminance for colormap rendering
+                imgArr = 0.299 * imgArr[:, :, 0] + 0.587 * imgArr[:, :, 1] + 0.114 * imgArr[:, :, 2]
+
+        # Select colormap for 2D scalar array
+        if cmap in ["cubehelix", "Cubehelix"]:
+            cm = plt.cm.cubehelix
+        else:
+            cm = plt.cm.gray
+
         # Set the colour clip to fractions of range, if requested
         zMin = None
         zMax = None
@@ -1897,8 +1966,7 @@ class PlotFrame(ttk.Frame):
             zMin = None
             zMax = None
         
-        # Show the image array in natural grayscale by default
-        ax.imshow(imgArr, cmap=plt.cm.gray, interpolation="nearest",
+        ax.imshow(imgArr, cmap=cm, interpolation="nearest",
                   origin="lower", vmin=zMin, vmax=zMax)
         ax.set_aspect('equal')
         self.axDict[axName][2] = 1

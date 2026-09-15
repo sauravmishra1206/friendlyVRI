@@ -29,6 +29,11 @@ This document summarizes the engineering review, bug fixes, multi-camera enhance
 - **Automatic Pipeline Execution**: Saving a scanned array automatically populates it into `configOutTab` and triggers real-time calculation of baselines, UV coverage, dirty beam, and visualizer plots.
 - **Geographical Orientation**: Corrected North ($N_m$) coordinate mapping in `write_arrayfile` so $Y=0$ maps to North pointing upwards.
 
+### 5. Natural RGB Color Webcam & Multi-Channel Interferometric Pipeline
+- **True Natural Color Preservation**: Webcam photos (`models/webcam.png`) and color sky models retain full 3-channel RGB data (`self.modelImgRGB`) without forced grayscale luma reduction.
+- **3-Channel Interferometric Synthesis**: `vriCalc.py` performs 2D Fourier transforms and $uv$-coverage sampling across each $(R, G, B)$ color channel, producing `self.obsImgRGB` so the telescope's reconstructed image renders in natural color.
+- **Interactive Color Mode Selector**: Added a **Color Mode** combobox dropdown (`Natural Color`, `Grayscale`, `Cubehelix`) across `vriTk.py` and `vriTkDemo.py` to switch dynamically between true color and false-color colormaps.
+
 ---
 
 ## Verification & Testing
@@ -40,6 +45,17 @@ This document summarizes the engineering review, bug fixes, multi-camera enhance
   X_pix: [130. 230. 460. 360.]
   Y_pix: [100. 180. 200. 290.]
   SUCCESS: Aluminum foil dish reflections on illuminated lightbox detected correctly!
+  ```
+- **RGB Color Pipeline Test**: Executed 3-channel RGB test on `models/webcam.png` and monochrome fallback test on `models/disc.png`:
+  ```text
+  1. Testing with webcam.png (color)...
+     modelImgRGB shape: (1080, 1920, 3) hasColor: True
+     modelFFTarr_RGB shape: (1080, 1920, 3)
+  2. Testing observation pipeline...
+     obsImgRGB shape: (1080, 1920, 3) min: 0.6092 max: 1.0
+  3. Testing with disc.png (monochrome)...
+     Monochrome correctly handled!
+  ALL AUTOMATED TESTS PASSED!
   ```
 
 ---
