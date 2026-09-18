@@ -489,6 +489,15 @@ class observationManager:
                 return
 
         # Remember the range of scales and largest primary beam
+        if len(scaleMinLst_deg) == 0:
+            self.scaleMin_deg = np.nan
+            self.scaleMax_deg = np.nan
+            self.uvRngMin_lam = np.nan
+            self.uvRngMax_lam = np.nan
+            self.priBeamMax_deg = np.nan
+            self.statusuvCalc = False
+            return
+
         self.scaleMin_deg = np.min(scaleMinLst_deg)
         self.scaleMax_deg = np.max(scaleMaxLst_deg)
         self.uvRngMin_lam = 1.0/np.radians(np.max(scaleMaxLst_deg))
@@ -561,6 +570,53 @@ class observationManager:
         
         # Set the status of the model image & FFT flags to True
         self.statusModel = True
+
+    def update_model_frame(self, frame_rgb, pixScaleImg_asec=0.5):
+        """Update the model image from an in-memory RGB frame (numpy array)
+        and recompute the Fourier transform & observation pipeline."""
+        if frame_rgb is None or frame_rgb.size == 0:
+            return False
+
+        # Orientation matches standard PIL/numpy image loading in FriendlyVRI
+        self.modelImgRGB = np.flipud(frame_rgb)
+        
+        # Check if color variations exist across channels
+        if self.modelImgRGB.ndim == 3 and self.modelImgRGB.shape[2] >= 3:
+            if np.any(self.modelImgRGB[:, :, 0] != self.modelImgRGB[:, :, 1]) or \
+               np.any(self.modelImgRGB[:, :, 0] != self.modelImgRGB[:, :, 2]):
+                self.hasColor = True
+            else:
+                self.hasColor = False
+            l_img = 0.299 * self.modelImgRGB[:, :, 0] + 0.587 * self.modelImgRGB[:, :, 1] + 0.114 * self.modelImgRGB[:, :, 2]
+            self.modelImgArr = l_img.astype(np.float64)
+        else:
+            self.hasColor = False
+            self.modelImgArr = self.modelImgRGB.astype(np.float64)
+
+        self.pixScaleImg_asec = pixScaleImg_asec
+        self.nY, self.nX = self.modelImgArr.shape
+        self.statusModel = True
+
+        # Compute Fourier transform (FFT)
+        self.invert_model()
+
+        # If uv-coverage is calculated but not gridded (or grid shape changed), grid it now!
+        if self.statusuvCalc:
+            if not self.statusuvGrid or self.uvMaskArr is None or self.uvMaskArr.shape != self.modelFFTarr.shape:
+                self.grid_uvcoverage()
+                self.calc_beam()
+
+        # If uv-mask is ready, mask FFT and invert observation immediately
+        if self.statusuvGrid and self.uvMaskArr is not None:
+            self.obsFFTarr = self.modelFFTarr.copy() * self.uvMaskArr
+            if self.hasColor and self.modelFFTarr_RGB is not None:
+                self.obsFFTarr_RGB = self.modelFFTarr_RGB.copy() * self.uvMaskArr[:, :, None]
+            else:
+                self.obsFFTarr_RGB = None
+            
+            self.invert_observation()
+
+        return True
 
     def set_pixscale(self, pixScaleImg_asec=0.5):
         """Set a new value for the size of the pixels in the model image."""

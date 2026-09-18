@@ -231,6 +231,12 @@ class App(ttk.Frame):
                   lambda event : self._on_plot_elevation(event))
         self.parent.bind("<<plot_scalehist>>",
                   lambda event : self._on_plot_scalehist(event))
+        self.videoCap = None
+        self.videoRunning = False
+        self.parent.bind("<<start_video_stream>>",
+                         lambda event : self._on_start_video_stream(event))
+        self.parent.bind("<<stop_video_stream>>",
+                         lambda event : self._on_stop_video_stream(event))
         self.parent.bind("<<do_observation>>",
                   lambda event : self._on_do_observation(event))
         self.parent.bind("<<show_results>>",
@@ -571,6 +577,121 @@ class App(ttk.Frame):
 
         self.pltFrm.figCanvas.draw()
 
+    def _on_start_video_stream(self, event=None):
+        """Start streaming live camera video or video file into the interferometry pipeline."""
+        src_mode = getattr(self.modelSelector, "videoSource", None)
+        if src_mode is None:
+            return
+
+        self._on_stop_video_stream()
+
+        val = src_mode.get()
+        if val == "Live Camera Feed":
+            sel_idx = 0
+            try:
+                cam_val = self.modelSelector.camDev.get()
+                if "Camera" in cam_val:
+                    sel_idx = int(cam_val.split()[-1])
+            except Exception:
+                sel_idx = 0
+
+            cap = cv2.VideoCapture()
+            for idx in [sel_idx] + [i for i in [0, 1, 2, 3] if i != sel_idx]:
+                if cap.open(idx):
+                    break
+
+            if cap.isOpened():
+                self.videoCap = cap
+                self.videoRunning = True
+                self._tick_video_stream()
+        elif val == "Video File":
+            vpath = getattr(self.modelSelector, "videoPath", None)
+            if vpath and os.path.exists(vpath):
+                cap = cv2.VideoCapture(vpath)
+                if cap.isOpened():
+                    self.videoCap = cap
+                    self.videoRunning = True
+                    self._tick_video_stream()
+
+    def _on_stop_video_stream(self, event=None):
+        """Stop any active video or camera stream."""
+        self.videoRunning = False
+        if self.videoCap is not None:
+            try:
+                self.videoCap.release()
+            except Exception:
+                pass
+            self.videoCap = None
+
+    def _tick_video_stream(self):
+        """Frame ticker loop: fetches next frame and updates all 4 plot panels in real time."""
+        if not self.videoRunning or self.videoCap is None or not self.videoCap.isOpened():
+            return
+
+        ret, frame = self.videoCap.read()
+        if not ret or frame is None:
+            src_mode = getattr(self.modelSelector, "videoSource", None)
+            if src_mode and src_mode.get() == "Video File":
+                self.videoCap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = self.videoCap.read()
+            if not ret or frame is None:
+                self.parent.after(50, self._tick_video_stream)
+                return
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w = frame_rgb.shape[:2]
+        if h > 512 or w > 512:
+            frame_rgb = cv2.resize(frame_rgb, (512, 512))
+
+        # Ensure uv-coverage is calculated if an array is selected
+        if len(self.obsManager.arrsSelected) > 0:
+            stateDict = self.obsManager.get_status()
+            if not stateDict['statusuvCalc']:
+                self.obsManager.calc_uvcoverage()
+                if self.obsManager.statusuvCalc:
+                    self.pltFrm.plot_uvcov("uvCov", self.obsManager.arrsSelected, title="uv-Coverage")
+
+            # Grid uv-coverage if not ready
+            stateDict = self.obsManager.get_status()
+            if stateDict['statusuvCalc'] and not stateDict['statusuvGrid']:
+                self.obsManager.invert_model()
+                self.obsManager.grid_uvcoverage()
+                self.obsManager.calc_beam()
+                if self.obsManager.beamArr is not None:
+                    self.pltFrm.plot_image("beam", np.abs(self.obsManager.beamArr), title="Synthesised Beam", pRng=(-0.1, 0.5))
+
+        pixScale_asec = self.modelSelector.pixScale_asec.get()
+        success = self.obsManager.update_model_frame(frame_rgb, pixScale_asec)
+        if success:
+            color_mode = getattr(self.modelSelector, "colorMode", None)
+            c_mode = color_mode.get() if color_mode else "Natural Color"
+
+            if self.obsManager.hasColor and self.obsManager.modelImgRGB is not None and c_mode == "Natural Color":
+                model_disp = self.obsManager.modelImgRGB
+            else:
+                model_disp = self.obsManager.modelImgArr
+            self.pltFrm.plot_image("modelImg", model_disp, title="Model Video", cmap=c_mode)
+
+            parmDict = self.obsManager.get_scales()
+            lim_kl = parmDict["fftScale_lam"] / 1e3
+            self.pltFrm.plot_fft("modelFFT", self.obsManager.modelFFTarr, limit=lim_kl, title="Model FFT")
+
+            if self.obsManager.statusuvGrid and self.obsManager.obsFFTarr is not None:
+                self.pltFrm.plot_fft("obsFFT", self.obsManager.obsFFTarr, limit=lim_kl, title="Observed FFT")
+
+            if self.obsManager.statusObsDone:
+                if self.obsManager.hasColor and self.obsManager.obsImgRGB is not None and c_mode == "Natural Color":
+                    obs_disp = self.obsManager.obsImgRGB
+                else:
+                    obs_disp = np.abs(self.obsManager.obsImgArr)
+                self.pltFrm.plot_image("obsImg", obs_disp, title="Observed Video", cmap=c_mode)
+
+            self.pltFrm.figCanvas.draw_idle()
+            self._update_status()
+
+        if self.videoRunning:
+            self.parent.after(33, self._tick_video_stream)
+
     def _on_do_observation(self, event=None):
         """Perform the bulk of the observing steps"""
         
@@ -755,13 +876,26 @@ class ModelSelector(ttk.Frame):
         self.colorModeLab.grid(column=1, row=3, padx=(15,5), pady=5, sticky="E")
         self.colorMode = tk.StringVar()
         self.colorModeComb = ttk.Combobox(self, state="readonly",
-                                          textvariable=self.colorMode,
-                                          values=["Natural Color", "Grayscale", "Cubehelix"],
-                                          width=14)
+                                           textvariable=self.colorMode,
+                                           values=["Natural Color", "Grayscale", "Cubehelix"],
+                                           width=14)
         self.colorModeComb.current(0)
         self.colorModeComb.grid(column=2, row=3, padx=5, pady=5, sticky="W")
         self.colorModeComb.bind("<<ComboboxSelected>>",
                                 lambda e: self.event_generate("<<colormode_changed>>"))
+
+        # Input Type selection (Static Image vs Live Camera Feed vs Video File)
+        self.videoSourceLab = ttk.Label(self, text="Input Type:")
+        self.videoSourceLab.grid(column=4, row=3, padx=5, pady=5, sticky="W")
+        self.videoSource = tk.StringVar(value="Static Image")
+        self.videoSourceComb = ttk.Combobox(self, state="readonly",
+                                            textvariable=self.videoSource,
+                                            values=["Static Image", "Live Camera Feed", "Video File"],
+                                            width=16)
+        self.videoSourceComb.current(0)
+        self.videoSourceComb.grid(column=5, row=3, padx=5, pady=5, sticky="W")
+        self.videoSourceComb.bind("<<ComboboxSelected>>",
+                                  lambda e: self._on_input_type_changed(e))
         
         # Pixel scale slider
         self.pixScaLab = ttk.Label(self,
@@ -781,15 +915,51 @@ class ModelSelector(ttk.Frame):
                         lambda e: self.event_generate("<<pixscale_changed>>"))
                 
     def _handler_image_selected(self, event=None):
-        
         modelPath = self.imgPreview.imagePath
         if not len(modelPath)==0:
             if os.path.exists(modelPath):
                 s = os.path.split(modelPath)
                 if len(s)==2:
-                    self.modelFile.set(s[-1])
-                    self.modelPath = modelPath
-                    self.event_generate("<<load_model_image>>")
+                    ext = os.path.splitext(modelPath)[1].lower()
+                    if ext in [".mp4", ".avi", ".mov", ".mkv"]:
+                        self.modelFile.set(s[-1])
+                        self.videoPath = modelPath
+                        self.videoSource.set("Video File")
+                        self.event_generate("<<start_video_stream>>")
+                    else:
+                        self.videoSource.set("Static Image")
+                        self.event_generate("<<stop_video_stream>>")
+                        self.modelFile.set(s[-1])
+                        self.modelPath = modelPath
+                        self.event_generate("<<load_model_image>>")
+
+    def _on_input_type_changed(self, event=None):
+        val = self.videoSource.get()
+        if val == "Static Image":
+            self.event_generate("<<stop_video_stream>>")
+            if hasattr(self, 'modelPath') and self.modelPath and os.path.exists(self.modelPath):
+                self.event_generate("<<load_model_image>>")
+        elif val == "Live Camera Feed":
+            self.event_generate("<<start_video_stream>>")
+        elif val == "Video File":
+            self._handler_browse_video()
+
+    def _handler_browse_video(self):
+        vPath = tkFileDialog.askopenfilename(
+            parent=self,
+            initialdir="models",
+            title="Choose a video file",
+            filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")]
+        )
+        if len(vPath) > 0 and os.path.exists(vPath):
+            s = os.path.split(vPath)
+            self.modelFile.set(s[-1])
+            self.videoPath = vPath
+            self.videoSource.set("Video File")
+            self.event_generate("<<start_video_stream>>")
+        else:
+            self.videoSource.set("Static Image")
+            self.event_generate("<<stop_video_stream>>")
         
     def _handler_capture_photo(self):
         """Capture a photo using the selected webcam."""
@@ -814,6 +984,8 @@ class ModelSelector(ttk.Frame):
                     if success and img is not None and img.size > 0:
                         break
             if success:
+                self.videoSource.set("Static Image")
+                self.event_generate("<<stop_video_stream>>")
                 cv2.imwrite("models/webcam.png", img)
                 self.modelFile.set("webcam.png")
                 self.modelPath = "models/webcam.png"
@@ -2002,8 +2174,8 @@ class PlotFrame(ttk.Frame):
             extent=None
         ax.imshow(np.abs(fftArr), norm=LogNorm(), cmap=plt.cm.cubehelix,
                   interpolation="nearest", origin="lower", extent=extent)
-        ax.set_xlabel(u"u (k$\lambda$)")
-        ax.set_ylabel(u"v (k$\lambda$)")
+        ax.set_xlabel(r"u (k$\lambda$)")
+        ax.set_ylabel(r"v (k$\lambda$)")
         ax.set_aspect('equal')
         plt.setp(ax.get_yticklabels(), visible=True)
         plt.setp(ax.get_xticklabels(), visible=True)
@@ -2051,8 +2223,8 @@ class PlotFrame(ttk.Frame):
                            s=2, color=colLst[i%len(colLst)], zorder=zLst[i])
                 ax.scatter(x=-u/1000, y=-v/1000, marker=".", edgecolor='none',
                            s=2, color=colLst[i%len(colLst)], zorder=zLst[i])
-            ax.set_xlabel(u"u (k$\lambda$)")
-            ax.set_ylabel(u"v (k$\lambda$)")
+            ax.set_xlabel(r"u (k$\lambda$)")
+            ax.set_ylabel(r"v (k$\lambda$)")
             ax.set_aspect('equal', 'datalim')
             ax.margins(0.02)
             plt.setp(ax.get_yticklabels(), visible=True)
